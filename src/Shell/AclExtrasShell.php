@@ -17,6 +17,8 @@ namespace Acl\Shell;
 use Acl\AclExtras;
 use Cake\Console\ConsoleIo;
 use Cake\Console\Shell;
+use Cake\Database\Exception;
+use Cake\ORM\TableRegistry;
 
 /**
  * Shell for ACO extras
@@ -62,8 +64,8 @@ class AclExtrasShell extends Shell
 
         if ($this->command) {
             try {
-                \Cake\ORM\TableRegistry::get('Aros')->schema();
-            } catch (\Cake\Database\Exception $e) {
+                TableRegistry::get('Aros')->schema();
+            } catch (Exception $e) {
                 $this->out(__d('cake_acl', 'Acl database tables not found. To create them, run:'));
                 $this->out();
                 $this->out('  bin/cake Migrations.migrations migrate -p Acl');
@@ -80,17 +82,49 @@ class AclExtrasShell extends Shell
      */
     public function acoSync()
     {
+        if (!empty($this->args[0]) && in_array($this->args[0], ['actions', 'models'])) {
+            $this->params['type'] = $this->args[0];
+        }
+
         $this->AclExtras->acoSync($this->params);
     }
 
     /**
      * Updates the Aco Tree with new controller actions.
      *
-     * @return void
+     * @return bool
      */
     public function acoUpdate()
     {
+        if (!empty($this->args[0]) && in_array($this->args[0], ['actions', 'models'])) {
+            $this->params['type'] = $this->args[0];
+        }
+
         $this->AclExtras->acoUpdate($this->params);
+
+        return true;
+    }
+
+    /**
+     * Sync the ACO table
+     *
+     * @return void
+     */
+    public function aroSync()
+    {
+        $this->AclExtras->aroSync($this->params);
+    }
+
+    /**
+     * Updates the Aco Tree with new controller actions.
+     *
+     * @return bool
+     */
+    public function aroUpdate()
+    {
+        $this->AclExtras->aroUpdate($this->params);
+
+        return true;
     }
 
     /**
@@ -119,6 +153,18 @@ class AclExtrasShell extends Shell
                 'help' => __('Perform a full sync on the ACO table.' .
                     'Will create new ACOs or missing controllers and actions.' .
                     'Will also remove orphaned entries that no longer have a matching controller/action')
+            ])->addSubcommand('aro_update', [
+                'parser' => [
+                    'options' => compact('plugin'),
+                    ],
+                'help' => __('Add new AROs for new users. Does not remove nodes from the ACO table.')
+            ])->addSubcommand('aro_sync', [
+                'parser' => [
+                    'options' => compact('plugin'),
+                    ],
+                'help' => __('Perform a full sync on the ARO table.' .
+                    'Will create new AROs or missing users.' .
+                    'Will also remove orphaned entries that no longer have a matching user.')
             ])->addSubcommand('recover', [
                 'help' => __('Recover a corrupted Tree'),
                 'parser' => [

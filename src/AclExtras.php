@@ -17,9 +17,15 @@ use Cake\Controller\ComponentRegistry;
 use Cake\Controller\Controller;
 use Cake\Core\App;
 use Cake\Core\Configure;
+use Cake\Core\ConventionsTrait;
 use Cake\Core\Plugin;
+use Cake\Database\Exception\MissingConnectionException;
+use Cake\Datasource\ConnectionManager;
 use Cake\Filesystem\Folder;
 use Cake\Network\Request;
+use Cake\ORM\Exception\MissingTableException;
+use Cake\ORM\Table;
+use Cake\ORM\TableRegistry;
 use Cake\Routing\Router;
 use Cake\Utility\Hash;
 use Cake\Utility\Inflector;
@@ -30,6 +36,8 @@ use Cake\Utility\Inflector;
  */
 class AclExtras
 {
+
+    use ConventionsTrait;
 
     /**
      * Contains instance of AclComponent
@@ -46,18 +54,36 @@ class AclExtras
     public $args;
 
     /**
-     * Contains database source to use
+     * The db connection being used for building ACL
      *
      * @var string
      */
-    public $dataSource = 'default';
+    public $connection = 'default';
 
     /**
-     * Root node name.
+     * Node Type/Name Mappings
+     *
+     * @var array
+     */
+    public $nodeTypeMap = [
+        'root' => 'root',
+        'controllers' => 'controllers',
+        'models' => 'models',
+        'prefix' => 'prefix',
+        'plugin' => 'plugin',
+        'controller' => 'controller',
+        'action' => 'action',
+        'table' => 'table',
+        'column' => 'column',
+        'belongsToMany' => 'column'
+    ];
+
+    /**
+     * Name separator.
      *
      * @var string
      */
-    public $rootNode = 'controllers';
+    public $nameSeparator = ' ';
 
     /**
      * Internal Clean Actions switch
@@ -90,7 +116,7 @@ class AclExtras
     /**
      * Start up And load Acl Component / Aco model
      *
-     * @param \Cake\Controller\Controller $controller Controller instance
+     * @param  [type] $controller [description]
      * @return void
      */
     public function startup($controller = null)
@@ -101,6 +127,7 @@ class AclExtras
         $registry = new ComponentRegistry();
         $this->Acl = new AclComponent($registry, Configure::read('Acl'));
         $this->Aco = $this->Acl->Aco;
+        $this->Aro = $this->Acl->Aro;
         $this->controller = $controller;
         $this->_buildPrefixes();
     }
@@ -111,14 +138,14 @@ class AclExtras
      * Will either use shell->out, or controller->Flash->success()
      *
      * @param string $msg The message to output.
-     * @return void
+     * @return void|string
      */
     public function out($msg)
     {
         if (!empty($this->controller->Flash)) {
             $this->controller->Flash->success($msg);
         } else {
-            $this->Shell->out($msg);
+            return $this->Shell->out($msg);
         }
     }
 
@@ -128,14 +155,14 @@ class AclExtras
      * Will either use shell->err, or controller->Flash->error()
      *
      * @param string $msg The message to output.
-     * @return void
+     * @return void|string
      */
     public function err($msg)
     {
         if (!empty($this->controller->Flash)) {
             $this->controller->Flash->error($msg);
         } else {
-            $this->Shell->err($msg);
+            return $this->Shell->err($msg);
         }
     }
 
@@ -155,28 +182,18 @@ class AclExtras
      * Updates the Aco Tree with new controller actions.
      *
      * @param array $params An array of parameters
-     * @return bool
+     * @return void|bool
      */
     public function acoUpdate($params = [])
     {
-        $root = $this->_checkNode($this->rootNode, $this->rootNode, null);
-        if (empty($params['plugin'])) {
-            $plugins = Plugin::loaded();
-            $this->_processControllers($root);
-            $this->_processPrefixes($root);
-            $this->_processPlugins($root, $plugins);
-        } else {
-            $plugin = $params['plugin'];
-            if (!Plugin::loaded($plugin)) {
-                $this->err(__d('cake_acl', "<error>Plugin {0} not found or not activated.</error>", [$plugin]));
+        $root = $this->_checkNode($this->nodeTypeMap['root'], $this->nodeTypeMap['root'], null, $this->nodeTypeMap['root']);
 
-                return false;
-            }
-            $plugins = [$params['plugin']];
-            $this->_processPlugins($root, $plugins);
-            $this->foundACOs = array_slice($this->foundACOs, 1, null, true);
+        if (empty($params['type']) || (isset($params['type']) && $params['type'] == 'actions')) {
+            $this->_processActions($root, $params);
         }
-
+        if (empty($params['type']) || (isset($params['type']) && $params['type'] == 'models')) {
+            $this->_processModels($root);
+        }
         if ($this->_clean) {
             foreach ($this->foundACOs as $parentId => $acosList) {
                 $this->_cleaner($parentId, $acosList);
@@ -188,30 +205,63 @@ class AclExtras
     }
 
     /**
+     * Updates the Aco Tree with all plugins, prefixes & controllers
+     *
+     * @param \Acl\Model\Entity\Aco $parent The Root Aco Node
+     * @return bool|void Returns false if Plugin not Found!
+     */
+    protected function _processActions($parent, $params = [])
+    {
+        $controllersRoot = $this->_checkNode($this->nodeTypeMap['controllers'], $this->nodeTypeMap['controllers'], $parent->id, $this->nodeTypeMap['controllers']);
+
+        if (empty($params['plugin'])) {
+            $plugins = Plugin::loaded();
+            $this->_processControllers($controllersRoot);
+            $this->_processPrefixes($controllersRoot);
+            $this->_processPlugins($controllersRoot, $plugins);
+        } else {
+            $plugin = $params['plugin'];
+            if (!Plugin::loaded($plugin)) {
+                $this->err(__d('cake_acl', "<error>Plugin {0} not found or not activated.</error>", [$plugin]));
+
+                return false;
+            }
+            $plugins = [$params['plugin']];
+            $this->_processPlugins($controllersRoot, $plugins);
+            $this->foundACOs = array_slice($this->foundACOs, 1, null, true);
+        }
+    }
+
+    /**
      * Updates the Aco Tree with all App controllers.
      *
-     * @param \Acl\Model\Entity\Aco $root The root note of Aco Tree
+     * @param \Acl\Model\Entity\Aco $parent The parent node of Controller side of Aco Tree
      * @return void
      */
-    protected function _processControllers($root)
+    protected function _processControllers($parent)
     {
         $controllers = $this->getControllerList();
-        $this->foundACOs[$root->id] = $this->_updateControllers($root, $controllers);
+        $this->foundACOs[$parent->id] = $this->_updateControllers($parent, $controllers);
     }
 
     /**
      * Updates the Aco Tree with all App route prefixes.
      *
-     * @param \Acl\Model\Entity\Aco $root The root note of Aco Tree
+     * @param \Acl\Model\Entity\Aco $parent The parent node of the controller side of Aco Tree
      * @return void
      */
-    protected function _processPrefixes($root)
+    protected function _processPrefixes($parent)
     {
-        foreach (array_keys($this->getPrefixes()) as $prefix) {
+        foreach (array_keys($this->prefixes) as $prefix) {
             $controllers = $this->getControllerList(null, $prefix);
-            $path = $this->rootNode . '/' . $prefix;
-            $pathNode = $this->_checkNode($path, $prefix, $root->id);
-            $this->foundACOs[$root->id][] = $prefix;
+            $path = [
+                $this->nodeTypeMap['root'],
+                $this->nodeTypeMap['controllers'],
+                $prefix
+            ];
+            $path = implode('/', Hash::filter($path));
+            $pathNode = $this->_checkNode($path, $prefix, $parent->id, $this->nodeTypeMap['prefix']);
+            $this->foundACOs[$parent->id][] = $prefix;
             if (isset($this->foundACOs[$pathNode->id])) {
                 $this->foundACOs[$pathNode->id] += $this->_updateControllers($pathNode, $controllers, null, $prefix);
             } else {
@@ -234,22 +284,23 @@ class AclExtras
     /**
      * Updates the Aco Tree with all Plugins.
      *
-     * @param \Acl\Model\Entity\Aco $root The root note of Aco Tree
+     * @param \Acl\Model\Entity\Aco $parent The parent node of the controller side of Aco Tree
      * @param array $plugins list of App plugins
      * @return void
      */
-    protected function _processPlugins($root, array $plugins = [])
+    protected function _processPlugins($parent, array $plugins = [])
     {
         foreach ($plugins as $plugin) {
             $controllers = $this->getControllerList($plugin);
             $pluginAlias = $this->_pluginAlias($plugin);
             $path = [
-                $this->rootNode,
+                $this->nodeTypeMap['root'],
+                $this->nodeTypeMap['controllers'],
                 $pluginAlias
             ];
             $path = implode('/', Hash::filter($path));
-            $pathNode = $this->_checkNode($path, $pluginAlias, $root->id);
-            $this->foundACOs[$root->id][] = $pluginAlias;
+            $pathNode = $this->_checkNode($path, $pluginAlias, $parent->id, $this->nodeTypeMap['plugin']);
+            $this->foundACOs[$parent->id][] = $pluginAlias;
 
             if (isset($this->foundACOs[$pathNode->id])) {
                 $this->foundACOs[$pathNode->id] += $this->_updateControllers($pathNode, $controllers, $plugin);
@@ -260,20 +311,22 @@ class AclExtras
             if (isset($this->pluginPrefixes[$plugin])) {
                 foreach (array_keys($this->pluginPrefixes[$plugin]) as $prefix) {
                     $path = [
-                        $this->rootNode,
+                        $this->nodeTypeMap['root'],
+                        $this->nodeTypeMap['controllers'],
                         $pluginAlias
                     ];
                     $path = implode('/', Hash::filter($path));
-                    $pluginNode = $this->_checkNode($path, $pluginAlias, $root->id);
-                    $this->foundACOs[$root->id][] = $pluginAlias;
+                    $pluginNode = $this->_checkNode($path, $pluginAlias, $parent->id, $this->nodeTypeMap['plugin']);
+                    $this->foundACOs[$parent->id][] = $pluginAlias;
 
                     $path = [
-                        $this->rootNode,
+                        $this->nodeTypeMap['root'],
+                        $this->nodeTypeMap['controllers'],
                         $pluginAlias,
                         $prefix,
                     ];
                     $path = implode('/', Hash::filter($path));
-                    $pathNode = $this->_checkNode($path, $prefix, $pluginNode->id);
+                    $pathNode = $this->_checkNode($path, $prefix, $pluginNode->id, $this->nodeTypeMap['plugin']);
                     $this->foundACOs[$pluginNode->id][] = $prefix;
 
                     $controllers = $this->getControllerList($plugin, $prefix);
@@ -290,13 +343,13 @@ class AclExtras
     /**
      * Updates a collection of controllers.
      *
-     * @param array $root Array or ACO information for root node.
+     * @param array $parent Array or ACO information for parent node.
      * @param array $controllers Array of Controllers
      * @param string $plugin Name of the plugin you are making controllers for.
      * @param string $prefix Name of the prefix you are making controllers for.
      * @return array
      */
-    protected function _updateControllers($root, $controllers, $plugin = null, $prefix = null)
+    protected function _updateControllers($parent, $controllers, $plugin = null, $prefix = null)
     {
         $pluginPath = $this->_pluginAlias($plugin);
 
@@ -305,24 +358,19 @@ class AclExtras
         foreach ($controllers as $controller) {
             $tmp = explode('/', $controller);
             $controllerName = str_replace('Controller.php', '', array_pop($tmp));
-            // Always skip the App controller
             if ($controllerName == 'App') {
-                continue;
-            }
-            // Skip anything that is not a concrete controller
-            $namespace = $this->_getNamespace($controller, $pluginPath, $prefix);
-            if (!(new \ReflectionClass($namespace))->isInstantiable()) {
                 continue;
             }
             $controllersNames[] = $controllerName;
             $path = [
-                $this->rootNode,
+                $this->nodeTypeMap['root'],
+                $this->nodeTypeMap['controllers'],
                 $pluginPath,
                 $prefix,
                 $controllerName
             ];
             $path = implode('/', Hash::filter($path));
-            $controllerNode = $this->_checkNode($path, $controllerName, $root->id);
+            $controllerNode = $this->_checkNode($path, $controllerName, $parent->id, $this->nodeTypeMap['controller']);
             $this->_checkMethods($controller, $controllerName, $controllerNode, $pluginPath, $prefix);
         }
 
@@ -354,28 +402,27 @@ class AclExtras
     }
 
     /**
-     * Check a node for existance, create it if it doesn't exist.
+     * Check a node for existence, create it if it doesn't exist.
      *
      * @param string $path The path to check
      * @param string $alias The alias to create
      * @param int $parentId The parent id to use when creating.
+     * @param string $nodeType The type of node
      * @return array Aco Node array
      */
-    protected function _checkNode($path, $alias, $parentId = null)
+    protected function _checkNode($path, $alias, $parentId = null, $nodeType = null)
     {
         $node = $this->Aco->node($path);
         if (!$node) {
-            $aliases = explode('/', $alias);
-            foreach ($aliases as $newAlias) {
-                $parentId = !empty($node) ? $node->id : $parentId;
-                $data = [
-                    'parent_id' => $parentId,
-                    'model' => null,
-                    'alias' => $newAlias,
-                ];
-                $entity = $this->Aco->newEntity($data);
-                $node = $this->Aco->save($entity);
-            }
+            $data = [
+                'parent_id' => $parentId,
+                'model' => null,
+                'alias' => $alias,
+                'name' => Inflector::humanize($alias),
+                'node_type' => $nodeType,
+            ];
+            $entity = $this->Aco->newEntity($data);
+            $node = $this->Aco->save($entity);
             $this->out(__d('cake_acl', 'Created Aco node: <success>{0}</success>', $path));
         } else {
             $node = $node->first();
@@ -453,14 +500,15 @@ class AclExtras
                 continue;
             }
             $path = [
-                $this->rootNode,
+                $this->nodeTypeMap['root'],
+                $this->nodeTypeMap['controllers'],
                 $pluginPath,
                 $prefixPath,
                 $controllerName,
                 $action
             ];
             $path = implode('/', Hash::filter($path));
-            $this->_checkNode($path, $action, $node->id);
+            $this->_checkNode($path, $action, $node->id, $this->nodeTypeMap['action']);
             $actions[$key] = $action;
         }
         if ($this->_clean) {
@@ -473,13 +521,18 @@ class AclExtras
     /**
      * Recover an Acl Tree
      *
+     * @param string $type The Tree type to recover ACO|ARO
      * @return void
      */
-    public function recover()
+    public function recover($type = null)
     {
-        $type = Inflector::camelize($this->args[0]);
-        $this->Acl->{$type}->recover();
-        $this->out(__('Tree has been recovered, or tree did not need recovery.'));
+        if (!empty($type)) {
+            $type = Inflector::camelize($type);
+        } else {
+            $type = Inflector::camelize($this->args[0]);
+        }
+        $this->{$type}->recover();
+        $this->out(__d('cake_acl', 'Tree has been recovered, or tree did not need recovered.'));
     }
 
     /**
@@ -497,12 +550,12 @@ class AclExtras
         $namespace = preg_replace('/\.php/', '', $namespace);
         $prefixPath = preg_replace('/\//', '\\', Inflector::camelize($prefixPath));
         if (!$pluginPath) {
-            $rootNamespace = Configure::read('App.namespace');
+            $parentNamespace = Configure::read('App.namespace');
         } else {
-            $rootNamespace = preg_replace('/\//', '\\', $pluginPath);
+            $parentNamespace = preg_replace('/\//', '\\', $pluginPath);
         }
         $namespace = [
-            $rootNamespace,
+            $parentNamespace,
             'Controller',
             $prefixPath,
             $namespace
@@ -521,11 +574,7 @@ class AclExtras
         $routes = Router::routes();
         foreach ($routes as $key => $route) {
             if (isset($route->defaults['prefix'])) {
-                $prefixes = explode('/', $route->defaults['prefix']);
-                $prefix = implode('/', array_map(
-                    'Cake\\Utility\\Inflector::camelize',
-                    $prefixes
-                ));
+                $prefix = Inflector::camelize($route->defaults['prefix']);
                 if (!isset($route->defaults['plugin'])) {
                     $this->prefixes[$prefix] = true;
                 } else {
@@ -545,13 +594,7 @@ class AclExtras
     protected function _cleaner($parentId, $preservedItems = [])
     {
         $nodes = $this->Aco->find()->where(['parent_id' => $parentId]);
-        $methodFlip = [];
-        foreach ($preservedItems as $preservedItem) {
-            $aliases = explode('/', $preservedItem);
-            foreach ($aliases as $alias) {
-                $methodFlip[$alias] = true;
-            }
-        }
+        $methodFlip = array_flip($preservedItems);
         foreach ($nodes as $node) {
             if (!isset($methodFlip[$node->alias])) {
                 $crumbs = $this->Aco->find('path', ['for' => $node->id, 'order' => 'lft']);
@@ -568,22 +611,252 @@ class AclExtras
     }
 
     /**
-     * Get discovered app route prefixes
+     * Updates the Aco Tree with all tables, columns and BelongsToMany psudo columns
      *
-     * @return array
+     * @param \Acl\Model\Entity\Aco $parent The parent node of the model side of the Aco Tree
+     * @return void
      */
-    public function getPrefixes()
+    protected function _processModels($parent)
     {
-        return $this->prefixes;
+        $modelsRoot = $this->_checkNode($this->nodeTypeMap['models'], $this->nodeTypeMap['models'], $parent->id, $this->nodeTypeMap['models']);
+        $this->_processTables($modelsRoot);
     }
 
     /**
-     * Get discovered plugin route prefixes
+     * Updates the Aco Tree with all tables.
      *
-     * @return array
+     * @param \Acl\Model\Entity\Aco $parent The parent node of the model side of the Aco Tree
+     * @return void
      */
-    public function getPluginPrefixes()
+    protected function _processTables($parent)
     {
-        return $this->pluginPrefixes;
+        $tables = $this->getTables();
+        $this->foundACOs[$parent->id] = $this->_updateTables($parent, $tables);
+    }
+
+    /**
+     * Get an Array of all the tables in the supplied connection
+     * will halt the script if no tables are found.
+     *
+     * @return array Array of tables in the database.
+     * @throws \InvalidArgumentException When connection class
+     *   does not have a schemaCollection method.
+     */
+    public function getTables()
+    {
+        $db = ConnectionManager::get($this->connection);
+        if (!method_exists($db, 'schemaCollection')) {
+            throw new MissingConnectionException('Connections need to implement schemaCollection() to be used with bake.');
+        }
+        $schema = $db->schemaCollection();
+        $tables = $schema->listTables();
+        if (empty($tables)) {
+            throw new MissingTableException('Your database does not have any tables.');
+        }
+        sort($tables);
+
+        return $tables;
+    }
+
+    /**
+     * Find the BelongsToMany relations and add them to associations list
+     *
+     * @param \Cake\ORM\Table $model Model instance being generated
+     * @param array $associations Array of in-progress associations
+     * @return array Associations with belongsToMany added in.
+     */
+    protected function _findBelongsToMany($model, array $associations)
+    {
+        $schema = $model->schema();
+        $tableName = $schema->name();
+        $foreignKey = $this->_modelKey($tableName);
+
+        $tables = $this->getTables();
+        foreach ($tables as $otherTable) {
+            $assocTable = null;
+            $offset = strpos($otherTable, $tableName . '_');
+            $otherOffset = strpos($otherTable, '_' . $tableName);
+
+            if ($offset !== false) {
+                $assocTable = substr($otherTable, strlen($tableName . '_'));
+            } elseif ($otherOffset !== false) {
+                $assocTable = substr($otherTable, 0, $otherOffset);
+            }
+            if ($assocTable && in_array($assocTable, $tables)) {
+                $associations['belongsToMany'][] = $this->_camelize($assocTable);
+            }
+        }
+
+        return $associations;
+    }
+
+    /**
+     * Updates a collection of tables.
+     *
+     * @param \Acl\Model\Entity\Aco $parent The parent node of the model side of the Aco Tree
+     * @param array $tables List of found tables
+     * @return array table names
+     */
+    protected function _updateTables($parent, $tables)
+    {
+        foreach ($tables as $table) {
+            $path = [
+                $this->nodeTypeMap['root'],
+                $this->nodeTypeMap['models'],
+                $table
+            ];
+            $path = implode('/', Hash::filter($path));
+            $tableNode = $this->_checkNode($path, $table, $parent->id, $this->nodeTypeMap['table']);
+            $this->_checkColumns($table, $tableNode);
+        }
+
+        return $tables;
+    }
+
+    /**
+     * Check and Add/delete columns
+     *
+     * @param string $tableName The table to check
+     * @param array $node The node to check.
+     * @return void|bool
+     */
+    protected function _checkColumns($tableName, $node)
+    {
+        $name = Inflector::underscore($tableName);
+        if (TableRegistry::exists($tableName)) {
+            return TableRegistry::get($tableName);
+        }
+        $table = TableRegistry::get($tableName, [
+            'name' => $tableName,
+            'table' => $name,
+            'connection' => ConnectionManager::get($this->connection)
+        ]);
+        $associations = $this->_findBelongsToMany($table, ['belongsToMany' => []]);
+        $columns = $table->schema()->columns();
+        $columnNames = [];
+        foreach ($columns as $key => $column) {
+            $path = [
+                $this->nodeTypeMap['root'],
+                $this->nodeTypeMap['models'],
+                $tableName,
+                $column
+            ];
+            $path = implode('/', Hash::filter($path));
+            $this->_checkNode($path, $column, $node->id, $this->nodeTypeMap['column']);
+            $columnNames[$key] = $column;
+        }
+        foreach ($associations['belongsToMany'] as $belongsToMany) {
+            $column = Inflector::underscore($belongsToMany);
+            $path = [
+                $this->nodeTypeMap['root'],
+                $this->nodeTypeMap['models'],
+                $tableName,
+                $column
+            ];
+            $path = implode('/', Hash::filter($path));
+            $this->_checkNode($path, $column, $node->id, $this->nodeTypeMap['belongsToMany']);
+            $columnNames[] = $column;
+        }
+        if ($this->_clean) {
+            if ($this->_clean) {
+                $this->_cleaner($node->id, $columnNames);
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Sync the ARO table
+     *
+     * @param array $params An array of parameters
+     * @return void
+     */
+    public function aroSync($params = [])
+    {
+        $this->_clean = true;
+        $this->aroUpdate($params);
+    }
+
+    /**
+     * Updates the Aco Tree with new controller actions.
+     *
+     * @param array $params An array of parameters
+     * @return void|bool
+     */
+    public function aroUpdate($params = [])
+    {
+        $this->recover('aro');
+
+        $securityGroupsTable = TableRegistry::get('Users.SecurityGroups', [
+            'connection' => ConnectionManager::get($this->connection)
+        ]);
+        $usersTable = TableRegistry::get('Users.Users', [
+            'connection' => ConnectionManager::get($this->connection)
+        ]);
+
+        if (!TableRegistry::exists('Acl.Aros')) {
+            $arosTable = TableRegistry::get('Acl.Aros', [
+                'connection' => ConnectionManager::get($this->connection)
+            ]);
+        } else {
+            $arosTable = TableRegistry::get('Acl.Aros');
+        }
+
+        $securityGroups = $securityGroupsTable->find('all')->orderAsc('SecurityGroups.lft')->contain(['ParentSecurityGroups']);
+        foreach ($securityGroups as $securityGroup) {
+            $aro = $arosTable->find()->where(['Aros.model' => 'SecurityGroups', 'Aros.foreign_key' => $securityGroup->id])->first();
+            if (!isset($aro->id)) {
+                if ($securityGroup->has('parent_security_group')) {
+                    $parentAro = $arosTable->find()->where(['Aros.model' => 'SecurityGroups', 'Aros.foreign_key' => $securityGroup->parent_security_group->id])->first();
+                }
+                $aro = $arosTable->newEntity([
+                    'parent_id' => isset($parentAro->id) ? $parentAro->id : null,
+                    'model' => 'SecurityGroups',
+                    'foreign_key' => $securityGroup->id,
+                    'alias' => $securityGroup->name,
+                ]);
+                if ($arosTable->save($aro)) {
+                    $this->out(__d('cake_acl', 'Saved Missing Security Group: <warning>{0}</warning>', $aro->alias));
+                } else {
+                    $this->out(__d('cake_acl', 'Failed to save Missing Security Group: <error>{0}</error>', $aro->alias));
+                }
+            } else {
+                if (empty($aro->alias)) {
+                    $aro->alias = $securityGroup->name;
+                    $arosTable->save($aro);
+                }
+                $this->out(__d('cake_acl', 'Security Group Exists: <success>{0}</success>', $aro->alias));
+            }
+        }
+
+        $users = $usersTable->find('all');
+        foreach ($users as $user) {
+            $aro = $arosTable->find()->where(['Aros.model' => 'Users', 'Aros.foreign_key' => $user->id])->first();
+            if (!isset($aro->id)) {
+                $parentAro = $arosTable->find()->where(['Aros.model' => 'SecurityGroups', 'Aros.foreign_key' => $user->security_group_id])->first();
+                $aro = $arosTable->newEntity([
+                    'parent_id' => isset($parentAro->id) ? $parentAro->id : null,
+                    'model' => 'Users',
+                    'foreign_key' => $user->id,
+                    'alias' => $user->username,
+                ]);
+                if ($arosTable->save($aro)) {
+                    $this->out(__d('cake_acl', 'Saved Missing User: <warning>{0}</warning>', $aro->alias));
+                } else {
+                    $this->out(__d('cake_acl', 'Failed to save Missing User: <error>{0}</error>', $aro->alias));
+                }
+            } else {
+                if (empty($aro->alias)) {
+                    $aro->alias = $user->username;
+                    $arosTable->save($aro);
+                }
+                $this->out(__d('cake_acl', 'User Exists: <success>{0}</success>', $aro->alias));
+            }
+        }
+
+        $this->out(__d('cake_acl', '<success>Aro Update Complete</success>'));
+
+        return true;
     }
 }

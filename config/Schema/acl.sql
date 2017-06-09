@@ -13,6 +13,9 @@ CREATE TABLE acos (
 	alias VARCHAR(255) DEFAULT '',
 	lft INTEGER(10) DEFAULT NULL,
 	rght INTEGER(10) DEFAULT NULL,
+    name VARCHAR(255) DEFAULT '',
+    node_type VARCHAR(25) DEFAULT NULL,
+    hidden TINYINT(1) UNSIGNED NOT NULL DEFAULT 0,
 	PRIMARY KEY (id)
 );
 
@@ -35,10 +38,11 @@ CREATE TABLE aros (
 	alias VARCHAR(255) DEFAULT '',
 	lft INTEGER(10) DEFAULT NULL,
 	rght INTEGER(10) DEFAULT NULL,
+    hidden TINYINT(1) UNSIGNED NOT NULL DEFAULT 0,
 	PRIMARY KEY (id)
 );
 
-/* this indexes will improve acl perfomance */
+/* these indexes will improve acl performance */
 CREATE INDEX idx_acos_lft_rght ON `acos` (`lft`, `rght`);
 
 CREATE INDEX idx_acos_alias ON `acos` (`alias`);

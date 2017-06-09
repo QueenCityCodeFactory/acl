@@ -40,7 +40,7 @@ class AclComponent extends Component
      *
      * @var AclInterface
      */
-    protected $_Instance = null;
+    protected $Acl = null;
 
     /**
      * Aro object.
@@ -97,13 +97,13 @@ class AclComponent extends Component
             if (!$adapter instanceof AclInterface) {
                 throw new Exception('AclComponent adapters must implement AclInterface');
             }
-            $this->_Instance = $adapter;
-            $this->_Instance->initialize($this);
+            $this->Acl = $adapter;
+            $this->Acl->initialize($this);
 
             return;
         }
 
-        return $this->_Instance;
+        return $this->Acl;
     }
 
     /**
@@ -117,7 +117,7 @@ class AclComponent extends Component
      */
     public function check($aro, $aco, $action = "*")
     {
-        return $this->_Instance->check($aro, $aco, $action);
+        return $this->Acl->check($aro, $aco, $action);
     }
 
     /**
@@ -131,7 +131,7 @@ class AclComponent extends Component
      */
     public function allow($aro, $aco, $action = "*")
     {
-        return $this->_Instance->allow($aro, $aco, $action);
+        return $this->Acl->allow($aro, $aco, $action);
     }
 
     /**
@@ -145,7 +145,7 @@ class AclComponent extends Component
      */
     public function deny($aro, $aco, $action = "*")
     {
-        return $this->_Instance->deny($aro, $aco, $action);
+        return $this->Acl->deny($aro, $aco, $action);
     }
 
     /**
@@ -159,6 +159,6 @@ class AclComponent extends Component
      */
     public function inherit($aro, $aco, $action = "*")
     {
-        return $this->_Instance->inherit($aro, $aco, $action);
+        return $this->Acl->inherit($aro, $aco, $action);
     }
 }

@@ -11,10 +11,22 @@
  * @license       http://www.opensource.org/licenses/mit-license.php MIT License
  */
 use Cake\Core\Configure;
+use Cake\Event\EventManager;
 
 if (!Configure::read('Acl.classname')) {
-    Configure::write('Acl.classname', 'DbAcl');
+    Configure::write('Acl.classname', 'CachedDbAcl');
 }
 if (!Configure::read('Acl.database')) {
     Configure::write('Acl.database', 'default');
+}
+
+if (!Configure::read('Acl.cacheConfig') && Configure::read('Acl.classname') === 'CachedDbAcl') {
+    Configure::write('Acl.cacheConfig', [
+        'className' => 'File',
+        'prefix' => 'myapp_cake_acl_',
+        'path' => CACHE . 'persistent/',
+        'serialize' => true,
+        'duration' => '+1 years',
+        'url' => env('CACHE_CAKEACL_URL', null),
+    ]);
 }

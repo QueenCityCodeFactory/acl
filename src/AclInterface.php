@@ -13,8 +13,6 @@
  */
 namespace Acl;
 
-use Cake\Controller\Component;
-
 /**
  * Access Control List interface.
  * Implementing classes are used by AclComponent to perform ACL checks in Cake.
@@ -66,8 +64,8 @@ interface AclInterface
     /**
      * Initialization method for the Acl implementation
      *
-     * @param Component $component Component instance.
+     * @param object $object The object instance. Helper or Component
      * @return void
      */
-    public function initialize(Component $component);
+    public function initialize($object);
 }

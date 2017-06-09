@@ -14,6 +14,7 @@
 namespace Acl\Model\Table;
 
 use Acl\Model\Table\AclNodesTable;
+use Acl\Model\TreeviewTrait;
 use Cake\Core\App;
 
 /**
@@ -22,6 +23,8 @@ use Cake\Core\App;
  */
 class ArosTable extends AclNodesTable
 {
+
+    use TreeviewTrait;
 
     /**
      * {@inheritDoc}
@@ -34,7 +37,7 @@ class ArosTable extends AclNodesTable
         parent::initialize($config);
         $this->alias('Aros');
         $this->table('aros');
-        $this->addBehavior('Tree', ['type' => 'nested']);
+        $this->addBehavior('Tree');
 
         $this->belongsToMany('Acos', [
             'through' => App::className('Acl.PermissionsTable', 'Model/Table'),
@@ -44,7 +47,6 @@ class ArosTable extends AclNodesTable
             'className' => App::className('Acl.ArosTable', 'Model/Table'),
             'foreignKey' => 'parent_id'
         ]);
-
         $this->entityClass(App::className('Acl.Aro', 'Model/Entity'));
     }
 }

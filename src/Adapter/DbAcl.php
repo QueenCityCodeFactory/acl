@@ -14,7 +14,6 @@
 namespace Acl\Adapter;
 
 use Acl\AclInterface;
-use Cake\Controller\Component;
 use Cake\Core\App;
 use Cake\ORM\TableRegistry;
 
@@ -41,7 +40,6 @@ class DbAcl implements AclInterface
 
     /**
      * Constructor
-     *
      */
     public function __construct()
     {
@@ -49,21 +47,21 @@ class DbAcl implements AclInterface
         if (!TableRegistry::exists('Permissions')) {
             $config = ['className' => App::className('Acl.PermissionsTable', 'Model/Table')];
         }
-        $this->Permission = TableRegistry::get('Permissions', $config);
-        $this->Aro = $this->Permission->Aros->target();
-        $this->Aco = $this->Permission->Acos->target();
+        $this->Permissions = TableRegistry::get('Permissions', $config);
+        $this->Aro = $this->Permissions->Aros->target();
+        $this->Aco = $this->Permissions->Acos->target();
     }
 
     /**
-     * Initializes the containing component and sets the Aro/Aco objects to it.
+     * Initializes the containing object and sets the Aro/Aco objects to it.
      *
-     * @param AclComponent $component Component
+     * @param object $object Component/Helper
      * @return void
      */
-    public function initialize(Component $component)
+    public function initialize($object)
     {
-        $component->Aro = $this->Aro;
-        $component->Aco = $this->Aco;
+        $object->Aro = $this->Aro;
+        $object->Aco = $this->Aco;
     }
 
     /**
@@ -77,7 +75,7 @@ class DbAcl implements AclInterface
      */
     public function check($aro, $aco, $action = "*")
     {
-        return $this->Permission->check($aro, $aco, $action);
+        return $this->Permissions->check($aro, $aco, $action);
     }
 
     /**
@@ -92,7 +90,7 @@ class DbAcl implements AclInterface
      */
     public function allow($aro, $aco, $actions = "*", $value = 1)
     {
-        return $this->Permission->allow($aro, $aco, $actions, $value);
+        return $this->Permissions->allow($aro, $aco, $actions, $value);
     }
 
     /**
@@ -159,7 +157,7 @@ class DbAcl implements AclInterface
      */
     public function getAclLink($aro, $aco)
     {
-        return $this->Permission->getAclLink($aro, $aco);
+        return $this->Permissions->getAclLink($aro, $aco);
     }
 
     /**
@@ -170,6 +168,6 @@ class DbAcl implements AclInterface
      */
     protected function _getAcoKeys($keys)
     {
-        return $this->Permission->getAcoKeys($keys);
+        return $this->Permissions->getAcoKeys($keys);
     }
 }

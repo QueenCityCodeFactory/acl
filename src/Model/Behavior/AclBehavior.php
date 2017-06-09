@@ -14,7 +14,7 @@
 namespace Acl\Model\Behavior;
 
 use Cake\Core\App;
-use Cake\Core\Exception;
+use Cake\Core\Exception\Exception;
 use Cake\Event\Event;
 use Cake\ORM\Behavior;
 use Cake\ORM\Entity;
@@ -108,7 +108,7 @@ class AclBehavior extends Behavior
             }
         }
         if (empty($ref)) {
-            throw new Exception\Exception(__d('cake_dev', 'ref parameter must be a string or an Entity'));
+            throw new Exception(__d('cake_dev', 'ref parameter must be a string or an Entity'));
         }
 
         return $this->_table->{$type}->node($ref);
@@ -123,7 +123,7 @@ class AclBehavior extends Behavior
      */
     public function afterSave(Event $event, Entity $entity)
     {
-        $model = $event->subject();
+        $model = $event->getSubject();
         $types = $this->_typeMaps[$this->config('type')];
         if (!is_array($types)) {
             $types = [$types];
@@ -137,11 +137,8 @@ class AclBehavior extends Behavior
                 'parent_id' => isset($parent->id) ? $parent->id : null,
                 'model' => $model->alias(),
                 'foreign_key' => $entity->id,
+                'alias' => $entity->alias,
             ];
-
-            if (method_exists($entity, 'nodeAlias')) {
-                $data['alias'] = $entity->nodeAlias();
-            }
 
             if (!$entity->isNew()) {
                 $node = $this->node($entity, $type)->first();
@@ -171,7 +168,7 @@ class AclBehavior extends Behavior
         foreach ($types as $type) {
             $node = $this->node($entity, $type)->toArray();
             if (!empty($node)) {
-                $event->subject()->{$type}->delete($node[0]);
+                $event->getSubject()->{$type}->delete($node[0]);
             }
         }
     }
