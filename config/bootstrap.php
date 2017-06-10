@@ -19,7 +19,15 @@ if (!Configure::read('Acl.classname')) {
 if (!Configure::read('Acl.database')) {
     Configure::write('Acl.database', 'default');
 }
-
+if (!Configure::read('Acl.usersModel')) {
+    Configure::write('Acl.usersModel', 'Users');
+}
+if (!Configure::read('Acl.groupsModel')) {
+    Configure::write('Acl.groupsModel', 'Groups');
+}
+if (!Configure::read('Acl.userForeignKey')) {
+    Configure::write('Acl.userForeignKey', 'group_id');
+}
 if (!Configure::read('Acl.cacheConfig') && Configure::read('Acl.classname') === 'CachedDbAcl') {
     Configure::write('Acl.cacheConfig', [
         'className' => 'File',

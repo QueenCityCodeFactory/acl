@@ -788,10 +788,10 @@ class AclExtras
     {
         $this->recover('aro');
 
-        $securityGroupsTable = TableRegistry::get('Users.SecurityGroups', [
+        $groupsTable = TableRegistry::get(Configure::read('Acl.groupsModel'), [
             'connection' => ConnectionManager::get($this->connection)
         ]);
-        $usersTable = TableRegistry::get('Users.Users', [
+        $usersTable = TableRegistry::get(Configure::read('Acl.usersModel'), [
             'connection' => ConnectionManager::get($this->connection)
         ]);
 
@@ -803,43 +803,44 @@ class AclExtras
             $arosTable = TableRegistry::get('Acl.Aros');
         }
 
-        $securityGroups = $securityGroupsTable->find('all')->orderAsc('SecurityGroups.lft')->contain(['ParentSecurityGroups']);
-        foreach ($securityGroups as $securityGroup) {
-            $aro = $arosTable->find()->where(['Aros.model' => 'SecurityGroups', 'Aros.foreign_key' => $securityGroup->id])->first();
+        $groups = $groupsTable->find('all')->orderAsc(Configure::read('Acl.groupsModel') . '.lft')->contain(['Parent' . Configure::read('Acl.groupsModel')]);
+        foreach ($groups as $group) {
+            $aro = $arosTable->find()->where(['Aros.model' => Configure::read('Acl.groupsModel'), 'Aros.foreign_key' => $group->id])->first();
             if (!isset($aro->id)) {
-                if ($securityGroup->has('parent_security_group')) {
-                    $parentAro = $arosTable->find()->where(['Aros.model' => 'SecurityGroups', 'Aros.foreign_key' => $securityGroup->parent_security_group->id])->first();
+                $parentGroupProperty = 'parent_' . Inflector::underscore(Inflector::singularize(Configure::read('Acl.groupsModel')));
+                if ($group->has($parentGroupProperty)) {
+                    $parentAro = $arosTable->find()->where(['Aros.model' => Configure::read('Acl.groupsModel'), 'Aros.foreign_key' => $group->{$parentGroupProperty}->id])->first();
                 }
                 $aro = $arosTable->newEntity([
                     'parent_id' => isset($parentAro->id) ? $parentAro->id : null,
-                    'model' => 'SecurityGroups',
-                    'foreign_key' => $securityGroup->id,
-                    'alias' => $securityGroup->name,
+                    'model' => Configure::read('Acl.groupsModel'),
+                    'foreign_key' => $group->id,
+                    'alias' => $group->alias,
                 ]);
                 if ($arosTable->save($aro)) {
-                    $this->out(__d('cake_acl', 'Saved Missing Security Group: <warning>{0}</warning>', $aro->alias));
+                    $this->out(__d('cake_acl', 'Saved Missing Group: <warning>{0}</warning>', $aro->alias));
                 } else {
-                    $this->out(__d('cake_acl', 'Failed to save Missing Security Group: <error>{0}</error>', $aro->alias));
+                    $this->out(__d('cake_acl', 'Failed to save Missing Group: <error>{0}</error>', $aro->alias));
                 }
             } else {
                 if (empty($aro->alias)) {
-                    $aro->alias = $securityGroup->name;
+                    $aro->alias = $group->alias;
                     $arosTable->save($aro);
                 }
-                $this->out(__d('cake_acl', 'Security Group Exists: <success>{0}</success>', $aro->alias));
+                $this->out(__d('cake_acl', 'Group Exists: <success>{0}</success>', $aro->alias));
             }
         }
 
         $users = $usersTable->find('all');
         foreach ($users as $user) {
-            $aro = $arosTable->find()->where(['Aros.model' => 'Users', 'Aros.foreign_key' => $user->id])->first();
+            $aro = $arosTable->find()->where(['Aros.model' => Configure::read('Acl.usersModel'), 'Aros.foreign_key' => $user->id])->first();
             if (!isset($aro->id)) {
-                $parentAro = $arosTable->find()->where(['Aros.model' => 'SecurityGroups', 'Aros.foreign_key' => $user->security_group_id])->first();
+                $parentAro = $arosTable->find()->where(['Aros.model' => Configure::read('Acl.groupsModel'), 'Aros.foreign_key' => $user->{Configure::read('Acl.userForeignKey')}])->first();
                 $aro = $arosTable->newEntity([
                     'parent_id' => isset($parentAro->id) ? $parentAro->id : null,
-                    'model' => 'Users',
+                    'model' => Configure::read('Acl.usersModel'),
                     'foreign_key' => $user->id,
-                    'alias' => $user->username,
+                    'alias' => $user->alias,
                 ]);
                 if ($arosTable->save($aro)) {
                     $this->out(__d('cake_acl', 'Saved Missing User: <warning>{0}</warning>', $aro->alias));
@@ -848,7 +849,7 @@ class AclExtras
                 }
             } else {
                 if (empty($aro->alias)) {
-                    $aro->alias = $user->username;
+                    $aro->alias = $user->alias;
                     $arosTable->save($aro);
                 }
                 $this->out(__d('cake_acl', 'User Exists: <success>{0}</success>', $aro->alias));

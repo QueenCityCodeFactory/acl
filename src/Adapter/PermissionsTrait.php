@@ -25,7 +25,7 @@ trait PermissionsTrait
     {
         $key = $this->_getCacheKey($aco, $action);
         $cacheConfig = $this->_getNodeCacheKey($aro);
-        if (empty($cacheConfig) || (isset($aro['Users']) && empty($aro['Users']['security_group_id']))) {
+        if (empty($cacheConfig) || (isset($aro[Configure::read('Acl.userModel')]) && empty($aro[Configure::read('Acl.userModel')][Configure::read('Acl.userForeignKey')]))) {
             return false;
         }
         $this->_cacheConfig($cacheConfig);
