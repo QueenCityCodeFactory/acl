@@ -1,5 +1,5 @@
 <?php
-namespace App\Model;
+namespace Acl\Model;
 
 use Cake\Collection\Collection;
 use Cake\Collection\ExtractTrait;
